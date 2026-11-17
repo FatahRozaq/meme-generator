@@ -1,0 +1,28 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    schema: "migrations/*.up.sql"        # pakai migration yang sudah ada, urutan alfabetis = urutan benar
+    queries: "internal/db/queries"
+    gen:
+      go:
+        package: "db"
+        out: "internal/db"
+        sql_package: "pgx/v5"
+        emit_pointers_for_null_types: true
+        overrides:
+          - db_type: "uuid"
+            go_type: "string"
+          - db_type: "uuid"               # kolom nullable → *string
+            nullable: true
+            go_type:
+              type: "string"
+              pointer: true
+          - db_type: "timestamptz"
+            go_type: "time.Time"
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              type: "time.Time"
+              pointer: true
+          - db_type: "citext"
+            go_type: "string"

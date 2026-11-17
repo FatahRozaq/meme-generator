@@ -1,0 +1,16 @@
+# env
+.env
+*.log
+.DS_Store
+
+# api (go)
+api/bin/
+api/tmp/
+api/.gocache/
+api/.gomodcache/
+api/.gopath/
+
+# web (next.js)
+web/node_modules/
+web/.next/
+web/out/

@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-meme}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-meme}
+      POSTGRES_DB: ${POSTGRES_DB:-meme_portal}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  garage:
+    image: dxflrs/garage:v2.4.1
+    command: /garage server --single-node --default-bucket
+    environment:
+      GARAGE_RPC_SECRET: ${S3_RPC_SECRET:-5f1c9a2e7b3d4806a1e4c2b9f8d06a35c7e91b24fa08d3c65e2b4791af03c8d6}
+      GARAGE_DEFAULT_ACCESS_KEY: ${S3_ACCESS_KEY:-GK4f8e1c2a9b3d7e6051c2f3a4b5c6d7e8}
+      GARAGE_DEFAULT_SECRET_KEY: ${S3_SECRET_KEY:-9a17c3e84b02f5d16a7c93e8b402f1d5a6c8e793b204d5f18e7a9c3b2d4f6e081}
+      GARAGE_DEFAULT_BUCKET: ${S3_BUCKET:-meme-portal}
+    ports:
+      - "127.0.0.1:${S3_PORT:-3900}:3900"
+      - "127.0.0.1:${S3_WEB_PORT:-3902}:3902"
+      - "127.0.0.1:${S3_CONSOLE_PORT:-3903}:3903"
+    volumes:
+      - ./docker/garage.toml:/etc/garage.toml:ro
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
+    healthcheck:
+      test: ["CMD", "/garage", "status"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  redis_data:
+  garage_meta:
+  garage_data:

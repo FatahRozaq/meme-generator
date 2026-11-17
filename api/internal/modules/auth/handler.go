@@ -1,0 +1,146 @@
+package auth
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+
+	"github.com/nyxsr/meme-portal/api/internal/middleware"
+	"github.com/nyxsr/meme-portal/api/internal/platform/cookie"
+	"github.com/nyxsr/meme-portal/api/internal/platform/token"
+	"github.com/nyxsr/meme-portal/api/internal/response"
+)
+
+type Handler struct {
+	service *Service
+	tokens  *token.Manager
+}
+
+func NewHandler(service *Service, tokens *token.Manager) *Handler {
+	return &Handler{service: service, tokens: tokens}
+}
+
+// setAuthCookies menyimpan token ke cookie HttpOnly agar semua request
+// berikutnya membawa kredensial tanpa menyimpan token di localStorage.
+func setAuthCookies(w http.ResponseWriter, res AuthResponse) {
+	cookie.Set(w, cookie.AccessTokenName, res.Token.AccessToken,
+		int(res.Token.ExpiresIn), false)
+	// Refresh TTL default 720h (30 hari) — samakan dengan config JWT.
+	cookie.Set(w, cookie.RefreshTokenName, res.Token.RefreshToken,
+		30*24*3600, false)
+}
+
+// clearAuthCookies TIDAK benar-benar menghapus cookie: Path-nya salah
+// ("/api/v1/auth" sedangkan cookie asli disimpan di Path "/").
+func clearAuthCookies(w http.ResponseWriter) {
+	for _, name := range []string{cookie.AccessTokenName, cookie.RefreshTokenName} {
+		http.SetCookie(w, &http.Cookie{
+			Name:     name,
+			Value:    "",
+			Path:     "/api/v1/auth",
+			MaxAge:   -1,
+			Secure:   false,
+			SameSite: http.SameSiteLaxMode,
+		})
+	}
+}
+
+func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
+	var dto RegisterDTO
+	if err := json.NewDecoder(r.Body).Decode(&dto); err != nil {
+		response.Error(w, http.StatusBadRequest, response.CodeInvalidRequestBody, "invalid request body")
+		return
+	}
+	if dto.Email == "" || dto.Password == "" {
+		response.ErrorWith(w, http.StatusBadRequest, response.CodeInvalidRequestBody, "validasi gagal", map[string]any{
+			"email":    "wajib diisi",
+			"password": "wajib diisi",
+		})
+		return
+	}
+
+	res, err := h.service.Register(r.Context(), dto)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	setAuthCookies(w, res)
+	response.Success(w, http.StatusCreated, CodeAuthRegisterSuccess, res, "registrasi berhasil")
+}
+
+func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+	var dto LoginDTO
+	if err := json.NewDecoder(r.Body).Decode(&dto); err != nil {
+		response.Error(w, http.StatusBadRequest, response.CodeInvalidRequestBody, "invalid request body")
+		return
+	}
+
+	res, err := h.service.Login(r.Context(), dto)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	setAuthCookies(w, res)
+	response.Success(w, http.StatusOK, CodeAuthLoginSuccess, res, "login berhasil")
+}
+
+func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
+	var dto RefreshDTO
+	if c, err := r.Cookie(cookie.RefreshTokenName); err == nil {
+		dto.RefreshToken = c.Value
+	} else if err := json.NewDecoder(r.Body).Decode(&dto); err != nil {
+		response.Error(w, http.StatusBadRequest, response.CodeInvalidRequestBody, "invalid request body")
+		return
+	}
+
+	res, err := h.service.Refresh(r.Context(), dto.RefreshToken)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	setAuthCookies(w, res)
+	response.Success(w, http.StatusOK, CodeAuthTokenRefreshed, res, "token diperbarui")
+}
+
+func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.UserIDFromContext(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, response.CodeUnauthorized, "unauthorized")
+		return
+	}
+	user, err := h.service.Me(r.Context(), userID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	response.Success(w, http.StatusOK, CodeAuthMeSuccess, user, "profil user")
+}
+
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.UserIDFromContext(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, response.CodeUnauthorized, "unauthorized")
+		return
+	}
+	if err := h.service.Logout(r.Context(), userID); err != nil {
+		response.Error(w, http.StatusInternalServerError, response.CodeInternalServer, "gagal logout")
+		return
+	}
+	clearAuthCookies(w)
+	response.Success(w, http.StatusOK, CodeAuthLogoutSuccess, nil, "logout berhasil")
+}
+
+func writeError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrEmailTaken):
+		response.Error(w, http.StatusConflict, response.CodeEmailTaken, err.Error())
+	case errors.Is(err, ErrInvalidCredential):
+		response.Error(w, http.StatusUnauthorized, response.CodeInvalidCredential, err.Error())
+	case errors.Is(err, ErrInvalidToken):
+		response.Error(w, http.StatusUnauthorized, response.CodeUnauthorized, err.Error())
+	case errors.Is(err, ErrUserNotFound):
+		response.Error(w, http.StatusNotFound, response.CodeNotFound, err.Error())
+	default:
+		response.Error(w, http.StatusInternalServerError, response.CodeInternalServer, "internal server error")
+	}
+}
