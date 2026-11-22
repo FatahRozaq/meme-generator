@@ -31,6 +31,8 @@ Bug tambahan yang ditemukan saat verifikasi:
 |---|---|
 | `GetByID` memindai 9 tujuan untuk 10 kolom → semua penyelesaian meme 500 | `a2d981f` |
 | `Idempotency-Key` tidak diizinkan preflight CORS → tombol Berlangganan diam | `701e887` |
+| Bucket Garage tanpa aturan CORS → presigned PUT dari browser gagal (`CORS failed to fetch`) | `c2340a1` |
+| Bucket Garage `website access: false` → URL gambar publik 404, thumbnail gagal dimuat | `f2cbfef` |
 
 ## TKT-101 — Masih bisa membuat meme padahal paket habis
 
@@ -304,6 +306,36 @@ memesUsed=10 maxMemes=10
 
 2. **Preflight CORS menolak `Idempotency-Key`** (`701e887`) — lihat TKT-105.
 
+3. **Presigned PUT ditolak CORS** (`c2340a1`). Setelah TKT-108, browser harus
+   mengirim `Content-Type` gambar, sehingga request memicu preflight OPTIONS ke
+   Garage. Bucket belum punya aturan CORS:
+
+   ```
+   OPTIONS <presigned-url>
+   HTTP/1.1 403 Forbidden
+   <Error><Code>AccessDenied</Code><Message>Forbidden: This CORS request is not allowed.</Message>
+   ```
+
+   Di browser muncul `CORS failed to fetch` dan file tidak terunggah.
+   Perbaikan: `storage.EnsureCORS` dipanggil saat bootstrap memakai origin dari
+   `ALLOWED_ORIGINS` (GET/HEAD/PUT, header bebas). Setelah itu:
+
+   ```
+   OPTIONS → 200, access-control-allow-origin: http://localhost:3000
+   PUT     → 200, access-control-allow-origin: http://localhost:3000
+   ```
+
+4. **Website access bucket masih false** (`f2cbfef`). Bucket dibuat lewat
+   `GARAGE_DEFAULT_BUCKET`, tetapi akses website belum diaktifkan sehingga
+   `S3_PUBLIC_BASE_URL/result/<id>.png` mengembalikan 404 HTML dan thumbnail
+   meme gagal dimuat (`ERR_BLOCKED_BY_ORB`). `make infra-up` sekarang menjalankan
+   `garage bucket website --allow <bucket>`.
+
+   ```
+   sebelum: GET .../result/<id>.png → 404 text/html
+   sesudah: GET .../result/<id>.png → 200 image/png
+   ```
+
 ## Verifikasi
 
 - Setiap commit diuji dapat di-build (`go build ./...`) dari arsip commit-nya
@@ -312,6 +344,9 @@ memesUsed=10 maxMemes=10
 - Alur utama diuji pada aplikasi berjalan: register → checkout → bayar →
   status aktif → upload gambar dasar → upload hasil → complete → daftar meme →
   logout.
+- Alur UI diuji di Chromium: login, bayar, status langsung berubah tanpa hard
+  refresh, logout tanpa loop, pesan gagal bayar tampil, dan unggah meme di
+  Studio (PUT ke S3 200 dua kali, meme tersimpan, thumbnail tampil 200).
 
 ## Catatan
 

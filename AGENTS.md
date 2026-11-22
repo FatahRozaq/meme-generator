@@ -50,9 +50,11 @@ Catatan Windows:
 
 Tanpa make, jalankan manual urut:
 1. `docker compose up -d --wait postgres redis garage`
-2. `cd api && migrate -path migrations -database "$DATABASE_URL" up`
-3. `cd api && air` (hot reload, `api/.air.toml`)
-4. `cd web && bun run dev`
+2. `docker compose exec garage /garage bucket website --allow meme-portal`
+   (agar URL publik gambar bisa diakses browser)
+3. `cd api && migrate -path migrations -database "$DATABASE_URL" up`
+4. `cd api && air` (hot reload, `api/.air.toml`)
+5. `cd web && bun run dev`
 
 ### 2. Alur kerja backend
 
