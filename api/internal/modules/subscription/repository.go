@@ -94,17 +94,17 @@ func (r *Repository) CreateSubscription(ctx context.Context, userID string, p Pl
 
 // CheckoutByIdempotencyKey mengembalikan checkout yang sudah ada untuk key
 // yang sama (replay). ok=false berarti belum ada.
-func (r *Repository) CheckoutByIdempotencyKey(ctx context.Context, key string) (CheckoutResponse, bool, error) {
+func (r *Repository) CheckoutByIdempotencyKey(ctx context.Context, userID, key string) (CheckoutResponse, bool, error) {
 	const q = `
 		SELECT s.id, s.user_id, s.plan_id, s.status, s.starts_at, s.ends_at,
 		       p.id, p.subscription_id, p.amount_idr, p.status, p.reference
 		FROM payments p
 		JOIN subscriptions s ON s.id = p.subscription_id
-		WHERE p.idempotency_key = $1`
+		WHERE p.idempotency_key = $1 AND s.user_id = $2`
 	var (
 		res CheckoutResponse
 	)
-	err := r.pool.QueryRow(ctx, q, key).Scan(
+	err := r.pool.QueryRow(ctx, q, key, userID).Scan(
 		&res.Subscription.ID, &res.Subscription.UserID, &res.Subscription.PlanID,
 		&res.Subscription.Status, &res.Subscription.StartsAt, &res.Subscription.EndsAt,
 		&res.Payment.ID, &res.Payment.SubscriptionID, &res.Payment.AmountIDR,
