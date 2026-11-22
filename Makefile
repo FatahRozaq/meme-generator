@@ -119,6 +119,8 @@ ensure-air:
 
 infra-up:
 	docker compose up -d --wait postgres redis garage
+	@docker compose exec -T garage /garage bucket website --allow $(S3_BUCKET) >/dev/null 2>&1 \
+		|| printf '\n[infra] peringatan: gagal mengaktifkan akses website bucket $(S3_BUCKET).\n'
 	@printf '\n[infra] bucket $(S3_BUCKET) dipakai via GARAGE_DEFAULT_BUCKET.\n'
 
 infra-down:
