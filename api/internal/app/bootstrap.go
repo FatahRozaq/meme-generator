@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"log/slog"
 	"slices"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -46,5 +48,23 @@ func bootstrap(ctx context.Context, cfg config.Config) (deps *dependencies, err 
 		return nil, err
 	}
 
+	// Browser mengunggah langsung ke S3 memakai presigned PUT, jadi bucket
+	// harus mengizinkan origin web. Kegagalan di sini tidak fatal: S3 lain
+	// mungkin mengatur CORS di luar aplikasi.
+	if err := storage.EnsureCORS(ctx, s3Client, cfg.Storage.Bucket, splitOrigins(cfg.AllowedOrigins)); err != nil {
+		slog.Warn("bootstrap: gagal memasang CORS bucket", "err", err)
+	}
+
 	return &dependencies{db: db, redis: redisClient, s3: s3Client}, nil
+}
+
+// splitOrigins memecah daftar origin (dipisah koma) dari konfigurasi.
+func splitOrigins(raw string) []string {
+	var out []string
+	for _, o := range strings.Split(raw, ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			out = append(out, o)
+		}
+	}
+	return out
 }
