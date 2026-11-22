@@ -32,14 +32,10 @@ func NewService(repo *Repository, s3Client *s3.Client, cfg config.StorageConfig,
 
 // PrepareUpload membuat record meme (pending) dan mengembalikan presigned PUT URL
 // untuk mengunggah gambar dasar langsung ke S3/Garage.
-func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, contentType string) (UploadResponse, error) {
+func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, contentType string, size int64) (UploadResponse, error) {
 	if err := s.gate.CanCreate(ctx, userID); err != nil {
 		return UploadResponse{}, err
 	}
-	// BUG: tidak ada allowlist ekstensi dan tidak ada batas ukuran file.
-	// Semua tipe file lolos (pdf, zip, html, exe) dan presigned PUT tanpa
-	// Content-Length berarti ukurannya tak terbatas. Fix: validasi ext
-	// (allowedExt) + batas ukuran di presign/handler.
 	objectKey := fmt.Sprintf("base/%s%s", token.RandomHex(12), strings.ToLower(ext))
 
 	m, err := s.repo.Create(ctx, Meme{
@@ -50,14 +46,16 @@ func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, content
 		return UploadResponse{}, err
 	}
 
+	// Content-Type dan Content-Length ikut ditandatangani di presigned URL:
+	// upload dengan tipe/ukuran berbeda akan ditolak S3 (signature mismatch),
+	// jadi klien tidak bisa menyelundupkan file lain atau file raksasa.
 	presign := s3.NewPresignClient(s.s3)
-	input := &s3.PutObjectInput{Bucket: &s.bucket, Key: &objectKey}
-	// ContentType diambil mentah dari klien tanpa validasi allowlist —
-	// klien bisa memilih text/html dsb.
-	if contentType != "" {
-		input.ContentType = &contentType
-	}
-	req, err := presign.PresignPutObject(ctx, input, s3.WithPresignExpires(maxPresignTTL))
+	req, err := presign.PresignPutObject(ctx, &s3.PutObjectInput{
+		Bucket:        &s.bucket,
+		Key:           &objectKey,
+		ContentType:   &contentType,
+		ContentLength: &size,
+	}, s3.WithPresignExpires(maxPresignTTL))
 	if err != nil {
 		return UploadResponse{}, fmt.Errorf("meme service: presign gagal: %w", err)
 	}
@@ -114,12 +112,4 @@ func (s *Service) publicURL(key string) string {
 		return key
 	}
 	return strings.TrimRight(s.baseURL, "/") + "/" + path.Clean(key)
-}
-
-func allowedExt(ext string) bool {
-	switch strings.ToLower(ext) {
-	case ".jpg", ".jpeg", ".png", ".gif", ".webp":
-		return true
-	}
-	return false
 }
