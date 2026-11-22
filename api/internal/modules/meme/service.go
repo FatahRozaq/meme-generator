@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
@@ -15,7 +16,16 @@ import (
 // Gate memeriksa apakah user berhak membuat meme (langganan aktif).
 // Diimplementasikan oleh modul subscription lewat structural typing.
 type Gate interface {
+	// CanCreate memastikan user punya langganan aktif.
 	CanCreate(ctx context.Context, userID string) error
+	// Quota mengembalikan batas kuota beserta awal periode penghitungan.
+	Quota(ctx context.Context, userID string) (Quota, error)
+}
+
+// Quota adalah batas pembuatan meme pada langganan aktif.
+type Quota struct {
+	Since time.Time // meme dihitung sejak waktu ini (mulai langganan)
+	Max   int32     // 0 = unlimited
 }
 
 type Service struct {
@@ -38,10 +48,17 @@ func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, content
 	}
 	objectKey := fmt.Sprintf("base/%s%s", token.RandomHex(12), strings.ToLower(ext))
 
-	m, err := s.repo.Create(ctx, Meme{
+	// Pengecekan kuota dan pembuatan record meme harus satu transaksi:
+	// kalau dicek dulu lalu insert terpisah, request paralel (banyak tab)
+	// semuanya lolos cek dan kuota terlampaui.
+	quota, err := s.gate.Quota(ctx, userID)
+	if err != nil {
+		return UploadResponse{}, err
+	}
+	m, err := s.repo.CreateWithQuota(ctx, Meme{
 		UserID: userID, Title: title,
 		BaseImageURL: s.publicURL(objectKey),
-	})
+	}, quota)
 	if err != nil {
 		return UploadResponse{}, err
 	}

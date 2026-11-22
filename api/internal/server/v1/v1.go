@@ -23,6 +23,7 @@ type subscriptionGate struct {
 	sub *subscription.Service
 }
 
+// CanCreate memastikan user punya langganan aktif.
 func (g subscriptionGate) CanCreate(ctx context.Context, userID string) error {
 	status, err := g.sub.Status(ctx, userID)
 	if err != nil {
@@ -31,10 +32,15 @@ func (g subscriptionGate) CanCreate(ctx context.Context, userID string) error {
 	if !status.Subscribed {
 		return meme.ErrNotSubscribedGate
 	}
-	if status.MaxMemes > 0 && status.MemesUsed >= status.MaxMemes {
-		return meme.ErrNotSubscribedGate
-	}
 	return nil
+}
+
+func (g subscriptionGate) Quota(ctx context.Context, userID string) (meme.Quota, error) {
+	since, maxMemes, err := g.sub.ActiveQuota(ctx, userID)
+	if err != nil {
+		return meme.Quota{}, meme.ErrNotSubscribedGate
+	}
+	return meme.Quota{Since: since, Max: maxMemes}, nil
 }
 
 func Mount(mux *http.ServeMux, pool *pgxpool.Pool, rdb *redis.Client, s3Client *s3.Client, tokens *token.Manager, cfg config.Config) {
