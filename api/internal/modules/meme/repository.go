@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -66,8 +67,12 @@ func (r *Repository) GetByID(ctx context.Context, id, userID string) (Meme, erro
 	row := r.pool.QueryRow(ctx,
 		`SELECT id, user_id, title, base_url, result_url, top_text, bottom_text, font_size, created_at, updated_at
 		 FROM memes WHERE id = $1 AND user_id = $2`, id, userID)
-	var m Meme
-	err := row.Scan(&m.ID, &m.UserID, &m.Title, &m.BaseImageURL, &m.ResultURL, &m.TopText, &m.BottomText, &m.FontSize, &m.CreatedAt)
+	var (
+		m         Meme
+		updatedAt time.Time
+	)
+	err := row.Scan(&m.ID, &m.UserID, &m.Title, &m.BaseImageURL, &m.ResultURL,
+		&m.TopText, &m.BottomText, &m.FontSize, &m.CreatedAt, &updatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Meme{}, ErrNotFound
 	}
