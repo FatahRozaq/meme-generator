@@ -77,7 +77,14 @@ func (s *Service) MarkExpired(ctx context.Context) (int64, error) {
 func (s *Service) Status(ctx context.Context, userID string) (SubscriptionStatus, error) {
 	sub, plan, err := s.repo.ActiveByUser(ctx, userID)
 	if err == nil {
-		used, err := s.repo.MemesUsed(ctx, userID, time.Now().AddDate(0, 0, -int(plan.Duration)))
+		// Kuota dihitung sejak langganan aktif dimulai, bukan jendela
+		// bergulir "N hari terakhir" — supaya kuota tidak berubah-ubah
+		// saat langganan mendekati akhir masa aktif.
+		since := time.Now()
+		if sub.StartsAt != nil {
+			since = *sub.StartsAt
+		}
+		used, err := s.repo.MemesUsed(ctx, userID, since)
 		if err != nil {
 			return SubscriptionStatus{}, err
 		}
@@ -97,4 +104,18 @@ func (s *Service) Status(ctx context.Context, userID string) (SubscriptionStatus
 		}, nil
 	}
 	return SubscriptionStatus{Subscribed: false, MemesUsed: 0, MaxMemes: 0}, nil
+}
+
+// ActiveQuota mengembalikan awal periode kuota dan batas meme langganan
+// aktif user. 0 berarti unlimited.
+func (s *Service) ActiveQuota(ctx context.Context, userID string) (time.Time, int32, error) {
+	sub, plan, err := s.repo.ActiveByUser(ctx, userID)
+	if err != nil {
+		return time.Time{}, 0, ErrNotSubscribed
+	}
+	since := time.Now()
+	if sub.StartsAt != nil {
+		since = *sub.StartsAt
+	}
+	return since, plan.MaxMemes, nil
 }
