@@ -33,6 +33,7 @@ Bug tambahan yang ditemukan saat verifikasi:
 | `Idempotency-Key` tidak diizinkan preflight CORS → tombol Berlangganan diam | `701e887` |
 | Bucket Garage tanpa aturan CORS → presigned PUT dari browser gagal (`CORS failed to fetch`) | `c2340a1` |
 | Bucket Garage `website access: false` → URL gambar publik 404, thumbnail gagal dimuat | `f2cbfef` |
+| Refresh tanpa cookie membalas 400 dan dipanggil berulang tiap request 401 | `0f0fd1e` |
 
 ## TKT-101 — Masih bisa membuat meme padahal paket habis
 
@@ -335,6 +336,19 @@ memesUsed=10 maxMemes=10
    sebelum: GET .../result/<id>.png → 404 text/html
    sesudah: GET .../result/<id>.png → 200 image/png
    ```
+
+5. **Badai 401/refresh saat sesi habis** (`0f0fd1e`). Setelah logout, network
+   panel menampilkan `refresh` berulang dengan status 400: setiap request 401
+   memanggil refresh sendiri, dan handler membalas 400 karena tidak ada token.
+
+   ```
+   sebelum: me 401 → refresh 400 → status 401 → refresh 400 → memes 401 → refresh 400 ...
+   sesudah: me 401, status 401, memes 401, refresh 401  (masing-masing sekali)
+   ```
+
+   Perbaikan: handler refresh membalas 401 bila token tidak ada; klien memakai
+   single-flight refresh dan berhenti mencoba setelah gagal sampai ada login
+   atau refresh yang sukses; query client tidak mengulang error 4xx.
 
 ## Verifikasi
 
