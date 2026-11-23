@@ -1,15 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { ImagePlus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, unwrap } from "@/lib/api";
-import { describeError } from "@/lib/errors";
+import { apiMessage, describeError } from "@/lib/errors";
+import { cn } from "@/lib/utils";
 import { useMe } from "@/lib/auth";
+import { NoticeToast } from "@/components/notice-toast";
 import {
   useCompleteMeme,
   useMemes,
@@ -25,6 +28,15 @@ import {
 // 5. complete → simpan URL hasil ke database
 
 const FONT_STACK = "Impact, 'Arial Narrow Bold', sans-serif";
+
+// Sama dengan batas di backend (maxBaseImageBytes).
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+
+function formatBytes(n: number) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 // Family Anton (fallback Impact di Linux) di-resolve dari CSS var next/font.
 function canvasFont(size: number): string {
@@ -127,8 +139,14 @@ export default function StudioPage() {
   const [bottom, setBottom] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const closeError = useCallback(() => setError(""), []);
   const fileRef = useRef<HTMLInputElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
+  const previewUrlRef = useRef("");
+  const [fileName, setFileName] = useState("");
+  const [fileSize, setFileSize] = useState(0);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [dragging, setDragging] = useState(false);
 
   // Render ulang preview setiap teks berubah — jangan pakai rAF dari handler
   // onChange, karena closure-nya masih memegang state LAMA (inilah bug teks
@@ -142,6 +160,41 @@ export default function StudioPage() {
     const canvas = document.getElementById("meme-canvas") as HTMLCanvasElement | null;
     if (!canvas || !imgRef.current) return;
     drawMeme(canvas, imgRef.current, top, bottom);
+  };
+
+  // Satu jalur untuk file dari tombol telusuri maupun drag & drop.
+  const applyFile = (file: File) => {
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setError(`Ukuran ${file.name} ${formatBytes(file.size)}, maksimal 8 MiB.`);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    previewUrlRef.current = url;
+
+    const img = new Image();
+    img.onload = () => {
+      imgRef.current = img;
+      renderPreview();
+    };
+    img.src = url;
+
+    setFileName(file.name);
+    setFileSize(file.size);
+    setPreviewUrl(url);
+  };
+
+  const onDropFile = (e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    if (fileRef.current) {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      fileRef.current.files = dt.files;
+    }
+    applyFile(file);
   };
 
   const onSubmit = async (e: React.FormEvent) => {
@@ -165,7 +218,11 @@ export default function StudioPage() {
       imgRef.current = img;
 
       // 1) presign gambar dasar
-      const prepared = await prepare.mutateAsync({ title, filename: file.name });
+      const prepared = await prepare.mutateAsync({
+        title,
+        filename: file.name,
+        size: file.size,
+      });
       // 2) unggah gambar dasar ke Garage
       await putToS3(prepared.uploadUrl, file);
 
@@ -189,7 +246,7 @@ export default function StudioPage() {
       await complete.mutateAsync({ id: prepared.id, resultUrl: result.baseUrl });
       memes.refetch();
     } catch (err) {
-      setError(describeError(err));
+      setError(apiMessage(err, describeError(err)));
     } finally {
       setBusy(false);
     }
@@ -285,22 +342,54 @@ export default function StudioPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="image">Gambar dasar</Label>
-              <Input
-                id="image"
-                type="file"
-                accept="image/*"
-                ref={fileRef}
-                onChange={() => {
-                  const file = fileRef.current?.files?.[0];
-                  if (!file) return;
-                  const img = new Image();
-                  img.onload = () => {
-                    imgRef.current = img;
-                    renderPreview();
-                  };
-                  img.src = URL.createObjectURL(file);
+              <label
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragging(true);
                 }}
-              />
+                onDragLeave={() => setDragging(false)}
+                onDrop={onDropFile}
+                className={cn(
+                  "flex cursor-pointer items-center gap-3 rounded-md border border-dashed px-4 py-3 transition-colors",
+                  "hover:bg-accent/50 focus-within:ring-2 focus-within:ring-ring",
+                  dragging && "border-foreground/40 bg-accent/60",
+                )}
+              >
+                <Input
+                  id="image"
+                  type="file"
+                  accept="image/*"
+                  ref={fileRef}
+                  className="sr-only"
+                  onChange={() => {
+                    const file = fileRef.current?.files?.[0];
+                    if (file) applyFile(file);
+                  }}
+                />
+                {previewUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={previewUrl}
+                    alt=""
+                    className="size-12 shrink-0 rounded border object-cover"
+                  />
+                ) : (
+                  <ImagePlus
+                    aria-hidden="true"
+                    className="size-5 shrink-0 text-muted-foreground"
+                  />
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">
+                    {fileName || "Pilih gambar dari perangkat"}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    {fileName
+                      ? `${formatBytes(fileSize)} · klik untuk ganti`
+                      : "atau tarik file ke sini · JPG, PNG, GIF, WebP · maks 8 MiB"}
+                  </span>
+                </span>
+              </label>
             </div>
             <div className="space-y-2">
               <Label htmlFor="top">Teks atas</Label>
@@ -324,13 +413,19 @@ export default function StudioPage() {
               id="meme-canvas"
               className="mx-auto max-w-full rounded-md border bg-muted"
             />
-            {error && <p className="text-sm text-destructive">{error}</p>}
             <Button type="submit" disabled={busy || prepare.isPending}>
               {busy ? "Memproses…" : "Render & Simpan"}
             </Button>
           </form>
         </CardContent>
       </Card>
+
+      <NoticeToast
+        open={error !== ""}
+        title="Tidak bisa membuat meme"
+        message={error}
+        onClose={closeError}
+      />
 
       <section className="space-y-2">
         <h2 className="text-lg font-semibold">Meme Saya</h2>

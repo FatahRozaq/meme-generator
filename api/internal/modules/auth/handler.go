@@ -3,6 +3,7 @@ package auth
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/nyxsr/meme-portal/api/internal/middleware"
@@ -30,19 +31,12 @@ func setAuthCookies(w http.ResponseWriter, res AuthResponse) {
 		30*24*3600, false)
 }
 
-// clearAuthCookies TIDAK benar-benar menghapus cookie: Path-nya salah
-// ("/api/v1/auth" sedangkan cookie asli disimpan di Path "/").
+// clearAuthCookies menghapus cookie sesi. Path HARUS sama dengan saat
+// cookie dibuat ("/"), kalau tidak browser menyimpan cookie lama dan user
+// tetap dianggap login setelah logout.
 func clearAuthCookies(w http.ResponseWriter) {
-	for _, name := range []string{cookie.AccessTokenName, cookie.RefreshTokenName} {
-		http.SetCookie(w, &http.Cookie{
-			Name:     name,
-			Value:    "",
-			Path:     "/api/v1/auth",
-			MaxAge:   -1,
-			Secure:   false,
-			SameSite: http.SameSiteLaxMode,
-		})
-	}
+	cookie.Clear(w, cookie.AccessTokenName)
+	cookie.Clear(w, cookie.RefreshTokenName)
 }
 
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
@@ -88,8 +82,15 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	var dto RefreshDTO
 	if c, err := r.Cookie(cookie.RefreshTokenName); err == nil {
 		dto.RefreshToken = c.Value
-	} else if err := json.NewDecoder(r.Body).Decode(&dto); err != nil {
+	} else if err := json.NewDecoder(r.Body).Decode(&dto); err != nil && !errors.Is(err, io.EOF) {
 		response.Error(w, http.StatusBadRequest, response.CodeInvalidRequestBody, "invalid request body")
+		return
+	}
+	// Tidak ada cookie maupun token di body: sesi memang sudah tidak ada.
+	// Balas 401 (bukan 400) supaya klien tahu ini kondisi autentikasi dan
+	// berhenti mencoba refresh.
+	if dto.RefreshToken == "" {
+		response.Error(w, http.StatusUnauthorized, response.CodeUnauthorized, "refresh token tidak ada")
 		return
 	}
 

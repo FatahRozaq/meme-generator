@@ -9,20 +9,22 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useLogin } from "@/lib/auth";
+import { useMe, useLogin } from "@/lib/auth";
 import { apiErrorMessage } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
   const login = useLogin();
+  const me = useMe();
 
-  // BUG: kalau cookie auth masih ada (misal logout gagal menghapusnya),
-  // langsung dilempar ke halaman utama — memicu redirect bolak-balik.
+  // Sudah punya sesi valid → langsung ke studio. Dicek lewat /auth/me,
+  // bukan document.cookie: cookie bisa tertinggal setelah logout gagal dan
+  // memicu redirect bolak-balik antara "/" dan "/login".
   useEffect(() => {
-    if (document.cookie.includes("meme_access_token")) {
-      router.replace("/");
+    if (me.data) {
+      router.replace("/studio");
     }
-  }, [router]);
+  }, [me.data, router]);
 
   const form = useForm({
     defaultValues: { email: "", password: "" },

@@ -2,8 +2,11 @@ package subscription
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/nyxsr/meme-portal/api/internal/platform/token"
 )
@@ -37,7 +40,7 @@ func (s *Service) ListPlans(ctx context.Context) ([]Plan, error) {
 // Checkout membuat checkout baru; jika idempotencyKey pernah dipakai,
 // checkout yang sama dikembalikan (replay) tanpa membuat baris baru.
 func (s *Service) Checkout(ctx context.Context, userID string, dto CheckoutDTO, idempotencyKey string) (CheckoutResponse, error) {
-	if prev, ok, err := s.repo.CheckoutByIdempotencyKey(ctx, idempotencyKey); err != nil {
+	if prev, ok, err := s.repo.CheckoutByIdempotencyKey(ctx, userID, idempotencyKey); err != nil {
 		return CheckoutResponse{}, err
 	} else if ok {
 		return prev, nil
@@ -54,6 +57,15 @@ func (s *Service) Checkout(ctx context.Context, userID string, dto CheckoutDTO, 
 	reference := token.RandomHex(12)
 	sub, pay, err := s.repo.CreateSubscription(ctx, userID, plan, reference, idempotencyKey)
 	if err != nil {
+		// Dua request dengan key sama tiba bersamaan: yang kalah menabrak
+		// unique index idempotency_key. Kembalikan checkout yang sudah
+		// dibuat request pemenang, jangan lempar 500.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			if prev, ok, err2 := s.repo.CheckoutByIdempotencyKey(ctx, userID, idempotencyKey); err2 == nil && ok {
+				return prev, nil
+			}
+		}
 		return CheckoutResponse{}, err
 	}
 	url, err := s.gateway.CreateCharge(ctx, pay.AmountIDR, reference)
@@ -77,7 +89,14 @@ func (s *Service) MarkExpired(ctx context.Context) (int64, error) {
 func (s *Service) Status(ctx context.Context, userID string) (SubscriptionStatus, error) {
 	sub, plan, err := s.repo.ActiveByUser(ctx, userID)
 	if err == nil {
-		used, err := s.repo.MemesUsed(ctx, userID, time.Now().AddDate(0, 0, -int(plan.Duration)))
+		// Kuota dihitung sejak langganan aktif dimulai, bukan jendela
+		// bergulir "N hari terakhir" — supaya kuota tidak berubah-ubah
+		// saat langganan mendekati akhir masa aktif.
+		since := time.Now()
+		if sub.StartsAt != nil {
+			since = *sub.StartsAt
+		}
+		used, err := s.repo.MemesUsed(ctx, userID, since)
 		if err != nil {
 			return SubscriptionStatus{}, err
 		}
@@ -97,4 +116,18 @@ func (s *Service) Status(ctx context.Context, userID string) (SubscriptionStatus
 		}, nil
 	}
 	return SubscriptionStatus{Subscribed: false, MemesUsed: 0, MaxMemes: 0}, nil
+}
+
+// ActiveQuota mengembalikan awal periode kuota dan batas meme langganan
+// aktif user. 0 berarti unlimited.
+func (s *Service) ActiveQuota(ctx context.Context, userID string) (time.Time, int32, error) {
+	sub, plan, err := s.repo.ActiveByUser(ctx, userID)
+	if err != nil {
+		return time.Time{}, 0, ErrNotSubscribed
+	}
+	since := time.Now()
+	if sub.StartsAt != nil {
+		since = *sub.StartsAt
+	}
+	return since, plan.MaxMemes, nil
 }

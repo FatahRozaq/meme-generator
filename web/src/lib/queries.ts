@@ -3,6 +3,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { useRef } from "react";
 import { api, unwrap } from "@/lib/api";
 import type {
   CheckoutResponse,
@@ -31,28 +32,41 @@ export function useSubscriptionStatus() {
     queryKey: queryKeys.subscription,
     queryFn: async () =>
       unwrap<SubscriptionStatus>(await api.get("/api/v1/subscription/status")),
-    // BUG: status dianggap abadi — setelah beli/expired, UI tidak pernah
-    // mengambil ulang sampai invalidate manual / reload penuh.
-    staleTime: Number.POSITIVE_INFINITY,
+    // Status boleh basi sebentar, tapi tidak abadi: setelah pembayaran
+    // sukses query ini di-invalidate dan langsung diambil ulang.
+    staleTime: 10_000,
   });
 }
 
 export function useCheckout() {
   const qc = useQueryClient();
+  // Satu maksud checkout = satu idempotency key. Key dibuat saat tombol
+  // pertama kali diklik untuk paket itu, lalu dipakai ulang pada klik/retry
+  // berikutnya sehingga backend mengembalikan checkout yang sama.
+  const keys = useRef(new Map<string, string>());
+
   return useMutation({
-    mutationFn: async (planCode: string) =>
-      unwrap<CheckoutResponse>(
+    mutationFn: async (planCode: string) => {
+      let key = keys.current.get(planCode);
+      if (!key) {
+        key = crypto.randomUUID();
+        keys.current.set(planCode, key);
+      }
+      return unwrap<CheckoutResponse>(
         await api.post("/api/v1/subscription/checkout", { planCode }, {
-          headers: {
-            // BUG: key dibuat BARU di setiap panggilan mutationFn — artinya
-            // setiap klik (termasuk double-click) dianggap maksud berbeda.
-            // Key yang benar dibuat sekali per maksud (mis. per plan yang
-            // dipilih) lalu dipakai ulang saat retry.
-            "Idempotency-Key": crypto.randomUUID(),
-          },
+          headers: { "Idempotency-Key": key },
         }),
-      ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.subscription }),
+      );
+    },
+    onSuccess: (_res, planCode) => {
+      keys.current.delete(planCode);
+      return qc.invalidateQueries({ queryKey: queryKeys.subscription });
+    },
+    onError: (_err, planCode) => {
+      // Key dibuang agar percobaan berikutnya (setelah error nyata, mis.
+      // paket tidak ditemukan) mendapat maksud baru.
+      keys.current.delete(planCode);
+    },
   });
 }
 
@@ -81,7 +95,7 @@ export function useMemes(limit = 20, offset = 0) {
 
 export function usePrepareUpload() {
   return useMutation({
-    mutationFn: async (input: { title: string; filename: string }) =>
+    mutationFn: async (input: { title: string; filename: string; size: number }) =>
       unwrap<UploadResponse>(
         await api.post("/api/v1/memes/upload", input),
       ),

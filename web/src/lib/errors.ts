@@ -1,3 +1,20 @@
+import { isAxiosError } from "axios";
+
+// Pesan dari server apa adanya (tanpa label status HTTP), dipakai untuk
+// notifikasi popup: mis. "Kuota meme paket ini sudah habis" langsung
+// menyebut sebabnya, bukan "Tidak diizinkan: ...".
+export function apiMessage(err: unknown, fallback: string): string {
+  if (!isAxiosError(err)) return fallback;
+  const data: unknown = err.response?.data;
+  if (typeof data !== "object" || data === null || !("message" in data)) {
+    return fallback;
+  }
+  const raw = data.message;
+  if (typeof raw !== "string" || !raw.trim()) return fallback;
+  const trimmed = raw.trim();
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
 // Ubah error apa pun (axios / network / Error biasa) menjadi pesan yang
 // jelas untuk ditampilkan di UI, termasuk kode status HTTP.
 export function describeError(err: unknown): string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,18 +18,47 @@ func NewPostgresRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-func (r *Repository) Create(ctx context.Context, m Meme) (Meme, error) {
+// CreateWithQuota membuat meme sekaligus menegakkan kuota langganan dalam
+// satu transaksi. Advisory lock per user men-serialkan pembuatan meme user
+// yang sama, sehingga request paralel tidak bisa melewati batas kuota.
+func (r *Repository) CreateWithQuota(ctx context.Context, m Meme, quota Quota) (Meme, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return Meme{}, fmt.Errorf("meme repository: begin gagal: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, m.UserID); err != nil {
+		return Meme{}, fmt.Errorf("meme repository: lock gagal: %w", err)
+	}
+
+	if quota.Max > 0 {
+		var used int32
+		if err := tx.QueryRow(ctx,
+			`SELECT COUNT(*) FROM memes WHERE user_id = $1 AND created_at >= $2`,
+			m.UserID, quota.Since,
+		).Scan(&used); err != nil {
+			return Meme{}, fmt.Errorf("meme repository: hitung kuota gagal: %w", err)
+		}
+		if used >= quota.Max {
+			return Meme{}, ErrQuotaExceeded
+		}
+	}
+
 	const q = `
 		INSERT INTO memes (user_id, title, base_url, top_text, bottom_text, font_size)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, user_id, title, base_url, result_url, top_text, bottom_text, font_size, created_at`
 	var out Meme
-	err := r.pool.QueryRow(ctx, q,
+	if err := tx.QueryRow(ctx, q,
 		m.UserID, m.Title, m.BaseImageURL, m.TopText, m.BottomText, m.FontSize,
 	).Scan(&out.ID, &out.UserID, &out.Title, &out.BaseImageURL, &out.ResultURL,
-		&out.TopText, &out.BottomText, &out.FontSize, &out.CreatedAt)
-	if err != nil {
+		&out.TopText, &out.BottomText, &out.FontSize, &out.CreatedAt); err != nil {
 		return Meme{}, fmt.Errorf("meme repository: create gagal: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Meme{}, fmt.Errorf("meme repository: commit gagal: %w", err)
 	}
 	return out, nil
 }
@@ -36,9 +66,13 @@ func (r *Repository) Create(ctx context.Context, m Meme) (Meme, error) {
 func (r *Repository) GetByID(ctx context.Context, id, userID string) (Meme, error) {
 	row := r.pool.QueryRow(ctx,
 		`SELECT id, user_id, title, base_url, result_url, top_text, bottom_text, font_size, created_at, updated_at
-		 FROM memes WHERE id = $1`, id)
-	var m Meme
-	err := row.Scan(&m.ID, &m.UserID, &m.Title, &m.BaseImageURL, &m.ResultURL, &m.TopText, &m.BottomText, &m.FontSize, &m.CreatedAt)
+		 FROM memes WHERE id = $1 AND user_id = $2`, id, userID)
+	var (
+		m         Meme
+		updatedAt time.Time
+	)
+	err := row.Scan(&m.ID, &m.UserID, &m.Title, &m.BaseImageURL, &m.ResultURL,
+		&m.TopText, &m.BottomText, &m.FontSize, &m.CreatedAt, &updatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Meme{}, ErrNotFound
 	}
@@ -47,11 +81,11 @@ func (r *Repository) GetByID(ctx context.Context, id, userID string) (Meme, erro
 
 func (r *Repository) SetResultURL(ctx context.Context, id, userID, resultURL string) (Meme, error) {
 	const q = `
-		UPDATE memes SET result_url = $2
-		WHERE id = $1
+		UPDATE memes SET result_url = $3
+		WHERE id = $1 AND user_id = $2
 		RETURNING id, user_id, title, base_url, result_url, top_text, bottom_text, font_size, created_at`
 	var out Meme
-	err := r.pool.QueryRow(ctx, q, id, resultURL).Scan(
+	err := r.pool.QueryRow(ctx, q, id, userID, resultURL).Scan(
 		&out.ID, &out.UserID, &out.Title, &out.BaseImageURL, &out.ResultURL,
 		&out.TopText, &out.BottomText, &out.FontSize, &out.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -91,7 +125,7 @@ func (r *Repository) ListByUser(ctx context.Context, userID string, limit, offse
 }
 
 func (r *Repository) Delete(ctx context.Context, id, userID string) error {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM memes WHERE id = $1`, id)
+	tag, err := r.pool.Exec(ctx, `DELETE FROM memes WHERE id = $1 AND user_id = $2`, id, userID)
 	if err != nil {
 		return fmt.Errorf("meme repository: delete gagal: %w", err)
 	}
