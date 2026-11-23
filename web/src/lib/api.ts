@@ -6,22 +6,63 @@ export const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+// Satu refresh untuk semua request yang kena 401 bersamaan. Tanpa ini
+// setiap request memicu panggilan /auth/refresh sendiri-sendiri.
+let refreshPromise: Promise<void> | null = null;
+// Setelah refresh gagal, sesi memang habis: jangan coba lagi sampai ada
+// login/register/refresh yang sukses, supaya tidak terjadi badai 401/400.
+let sessionExpired = false;
+
+function refreshSession(): Promise<void> {
+  if (!refreshPromise) {
+    refreshPromise = api
+      .post("/api/v1/auth/refresh")
+      .then(() => {
+        sessionExpired = false;
+      })
+      .catch((err) => {
+        sessionExpired = true;
+        throw err;
+      })
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+}
+
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    const url = res.config?.url ?? "";
+    if (
+      url.includes("/auth/login") ||
+      url.includes("/auth/register") ||
+      url.includes("/auth/refresh")
+    ) {
+      sessionExpired = false;
+    }
+    return res;
+  },
   async (error) => {
     const original = error.config;
-    // Access token kedaluwarsa → coba refresh sekali lewat proxy rewrite.
+    const url: string = original?.url ?? "";
+    // Access token kedaluwarsa → coba refresh sekali (dibagi bersama
+    // request lain), kecuali sesi sudah dinyatakan habis.
     if (
       error.response?.status === 401 &&
+      original &&
       !original._retried &&
-      !original.url?.includes("/auth/refresh")
+      !url.includes("/auth/refresh") &&
+      !url.includes("/auth/login") &&
+      !url.includes("/auth/logout") &&
+      !sessionExpired
     ) {
       original._retried = true;
       try {
-        await api.post("/api/v1/auth/refresh");
+        await refreshSession();
         return api(original);
       } catch {
-        // refresh gagal → biarkan error 401 asli naik.
+        // Refresh gagal → biarkan error 401 asli naik.
       }
     }
     return Promise.reject(error);

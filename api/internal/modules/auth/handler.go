@@ -3,6 +3,7 @@ package auth
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/nyxsr/meme-portal/api/internal/middleware"
@@ -81,8 +82,15 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	var dto RefreshDTO
 	if c, err := r.Cookie(cookie.RefreshTokenName); err == nil {
 		dto.RefreshToken = c.Value
-	} else if err := json.NewDecoder(r.Body).Decode(&dto); err != nil {
+	} else if err := json.NewDecoder(r.Body).Decode(&dto); err != nil && !errors.Is(err, io.EOF) {
 		response.Error(w, http.StatusBadRequest, response.CodeInvalidRequestBody, "invalid request body")
+		return
+	}
+	// Tidak ada cookie maupun token di body: sesi memang sudah tidak ada.
+	// Balas 401 (bukan 400) supaya klien tahu ini kondisi autentikasi dan
+	// berhenti mencoba refresh.
+	if dto.RefreshToken == "" {
+		response.Error(w, http.StatusUnauthorized, response.CodeUnauthorized, "refresh token tidak ada")
 		return
 	}
 
