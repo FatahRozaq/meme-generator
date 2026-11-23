@@ -16,7 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { useConfirmPayment } from "@/lib/queries";
-import { describeError } from "@/lib/errors";
+import { apiMessage, describeError } from "@/lib/errors";
 
 export default function CheckoutPage() {
   const { reference } = useParams<{ reference: string }>();
@@ -54,7 +54,7 @@ export default function CheckoutPage() {
           ) : null}
           {confirm.isError ? (
             <p className="text-center text-sm font-medium text-destructive">
-              Pembayaran gagal: {describeError(confirm.error)}
+              Pembayaran gagal: {apiMessage(confirm.error, describeError(confirm.error))}
             </p>
           ) : null}
         </CardContent>

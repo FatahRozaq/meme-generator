@@ -9,7 +9,7 @@ import { format, parseISO } from "date-fns";
 import { id as localeId } from "date-fns/locale";
 
 import { useCheckout, usePlans, useSubscriptionStatus } from "@/lib/queries";
-import { describeError } from "@/lib/errors";
+import { apiMessage, describeError } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -101,7 +101,7 @@ export default function PricingPage() {
                       checkout.mutate(plan.code, {
                         onSuccess: (res) =>
                           router.push(`/checkout/${res.payment.reference}`),
-                        onError: (err) => setNotice(describeError(err)),
+                        onError: (err) => setNotice(apiMessage(err, describeError(err))),
                       })
                     }
                   >

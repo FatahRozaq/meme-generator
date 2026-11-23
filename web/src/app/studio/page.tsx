@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
@@ -8,8 +8,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, unwrap } from "@/lib/api";
-import { describeError } from "@/lib/errors";
+import { apiMessage, describeError } from "@/lib/errors";
 import { useMe } from "@/lib/auth";
+import { NoticeToast } from "@/components/notice-toast";
 import {
   useCompleteMeme,
   useMemes,
@@ -127,6 +128,7 @@ export default function StudioPage() {
   const [bottom, setBottom] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const closeError = useCallback(() => setError(""), []);
   const fileRef = useRef<HTMLInputElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
 
@@ -193,7 +195,7 @@ export default function StudioPage() {
       await complete.mutateAsync({ id: prepared.id, resultUrl: result.baseUrl });
       memes.refetch();
     } catch (err) {
-      setError(describeError(err));
+      setError(apiMessage(err, describeError(err)));
     } finally {
       setBusy(false);
     }
@@ -328,13 +330,19 @@ export default function StudioPage() {
               id="meme-canvas"
               className="mx-auto max-w-full rounded-md border bg-muted"
             />
-            {error && <p className="text-sm text-destructive">{error}</p>}
             <Button type="submit" disabled={busy || prepare.isPending}>
               {busy ? "Memproses…" : "Render & Simpan"}
             </Button>
           </form>
         </CardContent>
       </Card>
+
+      <NoticeToast
+        open={error !== ""}
+        title="Tidak bisa membuat meme"
+        message={error}
+        onClose={closeError}
+      />
 
       <section className="space-y-2">
         <h2 className="text-lg font-semibold">Meme Saya</h2>
