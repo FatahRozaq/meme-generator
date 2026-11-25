@@ -6,6 +6,7 @@ package middleware
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -20,7 +21,10 @@ func CORS(allowedOrigins string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
-			if origin != "" && origins[origin] {
+			// Origin loopback (localhost, 127.0.0.1, [::1]) selalu diizinkan
+			// apa pun port-nya: penguji sering membuka 127.0.0.1:3000, dan
+			// menolaknya membuat semua request API gagal CORS.
+			if origin != "" && (origins[origin] || isLoopbackOrigin(origin)) {
 				h := w.Header()
 				h.Set("Access-Control-Allow-Origin", origin)
 				h.Set("Vary", "Origin")
@@ -41,4 +45,17 @@ func CORS(allowedOrigins string) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// isLoopbackOrigin mengenali origin yang berjalan di mesin yang sama.
+func isLoopbackOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	switch u.Hostname() {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
 }

@@ -70,7 +70,7 @@ func Load() (Config, error) {
 
 	return Config{
 		Port:           port,
-		AllowedOrigins: getenv("ALLOWED_ORIGINS", "http://localhost:3000"),
+		AllowedOrigins: getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"),
 		LogLevel:       getenv("LOG_LEVEL", "info"),
 		DB: DBConfig{
 			Host:     getenv("POSTGRES_HOST", "localhost"),
