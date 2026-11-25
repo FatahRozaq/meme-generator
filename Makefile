@@ -17,13 +17,38 @@ MIGRATE_VERSION ?= v4.18.3
 SQLC_VERSION ?= v1.30.0
 AIR_VERSION ?= v1.67.4
 
-.PHONY: setup dev ensure-deps install-go install-bun install-process-compose install-migrate ensure-migrate install-sqlc ensure-sqlc install-air ensure-air install-web-deps infra-up infra-down infra-down-v infra-logs dev-api dev-web migrate-new migrate-up migrate-down migrate-version migrate-force sqlc-generate build lint check test tidy
+.PHONY: setup dev dev-tui dev-stop dev-check ensure-deps install-go install-bun install-process-compose install-migrate ensure-migrate install-sqlc ensure-sqlc install-air ensure-air install-web-deps infra-up infra-down infra-down-v infra-logs dev-api dev-web migrate-new migrate-up migrate-down migrate-version migrate-force sqlc-generate build lint check test tidy
 
 setup: ensure-deps
 	@printf '\n[setup] semua dependency siap.\n'
 
-dev: ensure-deps
-	@PATH="$$PATH:$$(go env GOPATH)/bin" process-compose -f process-compose.yaml -p 8099 up $(if $(shell [ -t 0 ] && echo tty),,--tui=false)
+# Log mengalir ke terminal secara default. TUI tidak dipakai karena pada
+# sebagian terminal Windows layarnya kosong sehingga user tidak tahu
+# progres/error-nya. Pakai 'make dev-tui' bila memang ingin TUI.
+TUI ?= false
+
+dev: ensure-deps dev-check
+	@PATH="$$PATH:$$(go env GOPATH)/bin" process-compose -f process-compose.yaml -p 8099 up --tui=$(TUI)
+
+dev-check:
+	@node scripts/check-ports.mjs
+
+dev-tui: ensure-deps dev-check
+	@PATH="$$PATH:$$(go env GOPATH)/bin" process-compose -f process-compose.yaml -p 8099 up --tui=true
+
+# Hentikan semua proses dev, termasuk sisa proses yang masih memegang port.
+dev-stop:
+	-@PATH="$$PATH:$$(go env GOPATH)/bin" process-compose -p 8099 down >/dev/null 2>&1 || true
+	-@if printf '%s' "$(OS)" | grep -qi mingw; then \
+		powershell -NoProfile -Command "foreach($$p in 3000,8080,8099){ Get-NetTCPConnection -LocalPort $$p -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $$_ -Force -ErrorAction SilentlyContinue } }" >/dev/null 2>&1 || true; \
+	else \
+		for p in 3000 8080 8099; do \
+			pids=$$(lsof -ti tcp:$$p 2>/dev/null || true); \
+			[ -n "$$pids" ] && kill -9 $$pids 2>/dev/null || true; \
+		done; \
+	fi
+	-@powershell -NoProfile -Command "Get-Process process-compose,air,api -ErrorAction SilentlyContinue | Stop-Process -Force" >/dev/null 2>&1 || true
+	-@printf '[dev] proses dev dihentikan.\n'
 
 ensure-deps:
 	@command -v docker >/dev/null 2>&1 || { printf '\n[deps] docker wajib terpasang: https://docs.docker.com/get-docker/\n'; exit 1; }
