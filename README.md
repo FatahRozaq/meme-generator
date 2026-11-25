@@ -63,9 +63,16 @@ go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
 
 ```sh
 cp .env.example .env
-make setup   # cek & pasang dependency (docker, go, bun, migrate, sqlc, air)
-make dev     # infra + migrate + api (:8080) + web (:3000) via process-compose
+make setup      # cek & pasang dependency (docker, go, bun, migrate, sqlc, air)
+make dev        # infra + migrate + api (:8080) + web (:3000), log mengalir di terminal
+make dev-stop   # hentikan semua proses dev + sisa proses yang masih memegang port
 ```
+
+Ingin TUI process-compose? `make dev-tui`. Jika `make dev` berhenti dengan pesan
+`port sudah dipakai` (atau browser menggantung di `:3000`), jalankan `make dev-stop`
+lalu `make dev` lagi — biasanya ada sisa `next dev` dari sesi sebelumnya.
+
+Buka `http://localhost:3000` atau `http://127.0.0.1:3000` (keduanya didukung).
 
 Perintah lain: `make migrate-new name=x`, `make migrate-up`, `make sqlc-generate`,
 `make build`, `make lint`, `make test`, `make check`.

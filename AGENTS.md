@@ -39,8 +39,14 @@ Windows (host ini): `make`, `bun`, `process-compose` belum terpasang. Install ma
 ### 1. Menjalankan dev
 
 ```sh
-make dev   # infra + migrate + api :8080 + web :3000 via process-compose (TUI di :8099)
+make dev        # infra + migrate + api :8080 + web :3000 (log mengalir di terminal)
+make dev-tui    # versi TUI process-compose (port 8099)
+make dev-stop   # hentikan semua proses dev + sisa proses yang memegang port
 ```
+
+`make dev` mengecek port 3000/8080/8099 lebih dulu. Jika ada sisa proses dev lama,
+perintah berhenti dengan pesan `port sudah dipakai` — jalankan `make dev-stop`.
+Web bisa dibuka lewat `localhost:3000` maupun `127.0.0.1:3000`.
 
 Catatan Windows:
 - Binary air dikonfigurasi sebagai `tmp/api.exe` di `api/.air.toml` (Windows menolak
@@ -50,8 +56,9 @@ Catatan Windows:
 
 Tanpa make, jalankan manual urut:
 1. `docker compose up -d --wait postgres redis garage`
-2. `docker compose exec garage /garage bucket website --allow meme-portal`
-   (agar URL publik gambar bisa diakses browser)
+2. `MSYS_NO_PATHCONV=1 docker compose exec garage /garage bucket website --allow meme-portal`
+   (agar URL publik gambar bisa diakses browser; prefix `MSYS_NO_PATHCONV=1`
+   hanya perlu di Git Bash Windows agar `/garage` tidak diubah jadi path Windows)
 3. `cd api && migrate -path migrations -database "$DATABASE_URL" up`
 4. `cd api && air` (hot reload, `api/.air.toml`)
 5. `cd web && bun run dev`

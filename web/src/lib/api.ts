@@ -1,7 +1,10 @@
 import axios from "axios";
 
 export const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080",
+  // Same-origin: semua panggilan lewat rewrite Next (/api/* → API). Dengan
+  // begitu cookie sesi tetap first-party walau web dibuka lewat
+  // 127.0.0.1, IP LAN, atau port forwarding — bukan hanya localhost.
+  baseURL: "",
   withCredentials: true, // kirim cookie access/refresh token
   headers: { "Content-Type": "application/json" },
 });

@@ -34,6 +34,8 @@ Bug tambahan yang ditemukan saat verifikasi:
 | Bucket Garage tanpa aturan CORS → presigned PUT dari browser gagal (`CORS failed to fetch`) | `c2340a1` |
 | Bucket Garage `website access: false` → URL gambar publik 404, thumbnail gagal dimuat | `f2cbfef` |
 | Refresh tanpa cookie membalas 400 dan dipanggil berulang tiap request 401 | `0f0fd1e` |
+| Web dibuka lewat `127.0.0.1`/IP: CORS menolak origin & cookie sesi lintas-site → semua alur dasar gagal | `00dec53` |
+| `garage bucket website` gagal di Git Bash Windows karena `/garage` diubah jadi path Windows | `3ec4401` |
 
 ## TKT-101 — Masih bisa membuat meme padahal paket habis
 
@@ -349,6 +351,25 @@ memesUsed=10 maxMemes=10
    Perbaikan: handler refresh membalas 401 bila token tidak ada; klien memakai
    single-flight refresh dan berhenti mencoba setelah gagal sampai ada login
    atau refresh yang sukses; query client tidak mengulang error 4xx.
+
+5. **Alur dasar gagal saat web dibuka lewat 127.0.0.1/IP** (`00dec53`). Penguji
+   membuka `http://127.0.0.1:3000` sementara API di `http://localhost:8080`.
+   Preflight CORS ditolak (origin tidak terdaftar) dan, karena lintas-site,
+   cookie sesi `SameSite=Lax` tidak pernah disimpan sehingga semua request 401.
+
+   ```
+   sebelum: POST /api/v1/auth/login → net::ERR_FAILED ("Login gagal")
+   sesudah: POST /api/v1/auth/login → 200, GET /auth/me → 200, upload → 200
+   ```
+
+   Perbaikan: origin loopback selalu diizinkan, dan klien API memakai baseURL
+   relatif sehingga request lewat rewrite Next (`/api/*` → API) dan cookie
+   menjadi first-party untuk host apa pun (localhost, 127.0.0.1, IP LAN).
+
+6. **`make infra-up` gagal mengaktifkan website bucket di Windows** (`3ec4401`).
+   Git Bash mengubah argumen `/garage` menjadi `C:/Program Files/Git/garage`,
+   sehingga perintah gagal dan URL gambar publik 404. Perintah kini memakai
+   `MSYS_NO_PATHCONV=1` dan dicoba ulang sampai 60 detik.
 
 ## Verifikasi
 
