@@ -50,8 +50,9 @@ Catatan Windows:
 
 Tanpa make, jalankan manual urut:
 1. `docker compose up -d --wait postgres redis garage`
-2. `docker compose exec garage /garage bucket website --allow meme-portal`
-   (agar URL publik gambar bisa diakses browser)
+2. `MSYS_NO_PATHCONV=1 docker compose exec garage /garage bucket website --allow meme-portal`
+   (agar URL publik gambar bisa diakses browser; prefix `MSYS_NO_PATHCONV=1`
+   hanya perlu di Git Bash Windows agar `/garage` tidak diubah jadi path Windows)
 3. `cd api && migrate -path migrations -database "$DATABASE_URL" up`
 4. `cd api && air` (hot reload, `api/.air.toml`)
 5. `cd web && bun run dev`

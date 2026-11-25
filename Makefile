@@ -119,10 +119,11 @@ ensure-air:
 
 infra-up:
 	docker compose up -d --wait postgres redis garage
-	@i=0; until docker compose exec -T garage /garage bucket website --allow $(S3_BUCKET) >/dev/null 2>&1; do \
+	@i=0; until MSYS_NO_PATHCONV=1 docker compose exec -T garage /garage bucket website --allow $(S3_BUCKET) >/dev/null 2>&1; do \
 		i=$$((i+1)); \
-		if [ $$i -ge 20 ]; then \
-			printf '\n[infra] peringatan: gagal mengaktifkan akses website bucket $(S3_BUCKET).\n'; \
+		if [ $$i -ge 60 ]; then \
+			printf '\n[infra] peringatan: gagal mengaktifkan akses website bucket $(S3_BUCKET):\n'; \
+			MSYS_NO_PATHCONV=1 docker compose exec -T garage /garage bucket website --allow $(S3_BUCKET) || true; \
 			break; \
 		fi; \
 		sleep 1; \
